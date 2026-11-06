@@ -1,7 +1,4 @@
 # Pesquisa — Sequências de Acordes Customizadas
-
-Preencha esta fase antes de propor qualquer solução. O objetivo é investigar as perguntas abaixo com evidência real (código, dados, testes rápidos que você mesmo rodou), não chutar. Apague este bloco de instruções antes de entrega
-
 ## Perguntas que você precisa responder
 
 1. **Algoritmo de matching**: hoje, as 6 sequências hardcoded em `main.py` (linhas 40-45) são comparadas contra músicas via uma tag pré-computada
@@ -30,8 +27,6 @@ Preencha esta fase antes de propor qualquer solução. O objetivo é investigar 
    mudar.
 
 ## Registro das descobertas
-
-[Para cada pergunta acima: o que você encontrou, com referência de onde (arquivo, linha, documentação, teste que você rodou).]
 
 Irei utilizar a notação que o próprio comando "/research-codebase" utiliza para referencias arquivos (path/to/file.py:lines), achei muito interessante uma forma muito efetiva para referenciar o que encontrei.
 
@@ -84,7 +79,6 @@ Atualmente a página realiza a chamada da função/requisição para resgatar à
 
 ## Trade-offs identificados
 
-[Opções reais que você considerou para cada decisão (algoritmo, banco, frontend) e os prós/contras de cada uma. Isso alimenta a fase de proposta — não decida ainda aqui.]
 
 Bem, neste momento inicial a decisão de realizar o pré-processamento das músicas por sequência é muito boa. Uma vez que as sequências de acordes estão hardcoded, então são fixos. Evitanto processamento desnecessários em runtime.
 Entretanto, temos um ponto muito complicado que é a falta de sincronia entre as sequências hardcoded no frontend e no backend. O que gera incopatibilidade entre as sequências salvas.

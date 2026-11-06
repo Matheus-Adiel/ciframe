@@ -362,7 +362,7 @@ deve ser alterado nesta feature.
   `Content-Type`.
 - [x] Criar teste de persistência: cadastrar, fechar/reabrir o banco e verificar
   que a sequência continua disponível.
-- [ ] Rodar smoke test no Docker: `/generos`, `/sequencias`, cadastro, busca,
+- [x] Rodar smoke test no Docker: `/generos`, `/sequencias`, cadastro, busca,
   `docker restart` e `docker rm` + `docker run` com o mesmo volume.
 - [x] Preencher `04-test-report.md` com cobertura, comando exato e resultado da
   regressão.
@@ -560,7 +560,7 @@ verificação é feita por testes automatizados e smoke test manual no Docker.
 - [x] Corpo acima de 16 KB retorna `413`.
 - [x] Todas as respostas, inclusive `400`/`413`/`429`, continuam sendo
   `json.dumps(...)` com `Content-Type: text/html`.
-- [ ] Sequência customizada sobrevive a `docker restart` e a `docker rm` +
+- [x] Sequência customizada sobrevive a `docker restart` e a `docker rm` +
   `docker run` com o mesmo volume nomeado; volume vazio inicializa as seeds sem
   duplicar.
 - [x] Frontend lista seeds e customizadas, mantém o cadastro/busca acima do

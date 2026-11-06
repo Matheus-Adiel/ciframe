@@ -39,7 +39,7 @@ Lido integralmente para esta análise:
   `.gitignore:1-4`, `README.md:13-31`, `AGENTS.md:20-42`;
 - `docs/adr/0001-local-only-docker-deploy.md`, `docs/adr/0002-persist-custom-sequences.md`
   (template não preenchido), `docs/features/sequencias-customizadas/00-enunciado.md:1-130`;
-- `research/entendimento-do-repositorio.md` (seções "Deploy e operação" e
+- `artifacts/reppit/research/entendimento-do-repositorio.md` (seções "Deploy e operação" e
   "Observações factuais"), `main.py:49-98`, `musica.py:1-25`.
 
 Verificado empiricamente nesta data:

@@ -35,12 +35,12 @@ Preencha esta fase antes de propor qualquer solução. O objetivo é investigar 
 
 Irei utilizar a notação que o próprio comando "/research-codebase" utiliza para referencias arquivos (path/to/file.py:lines), achei muito interessante uma forma muito efetiva para referenciar o que encontrei.
 
-1. No momento, de acordo com o que foi relatado no resersh-codebase, não existe nenhum cálculo que é realizado em tempo real para encontrar as músicas com as sequências famosas. (research/entendimento-do-repositorio.md:195-196). Assim é realizado apenas um filtro nas músicas cuja o campo "SEQ_FAMOSA" contenha o índice como string.
-Essa parte de gerar a tag é feito no pipeline em "scripts/generate_data_set.py", que compara com a cifra em minúsculas e verifica se os acordes da música pertencem ao conjunto de acordes da sequência. (research/entendimento-do-repositorio.md:200-207)
-Esse pré-processamento usa a regra de que o bloco de acordes da sequência aparece de forma contínua e na ordem exata durante a música e a música inteira só usa acordes que pertencem ao conjunto da sequência. (research/algoritmo-de-matching.md:17-22)
-Além disso, há uma normalização parcial. O casamento de acordes ignora maiúsculas/minúsculas (.lower()), entretanto não há uma normalização na grafia dos acordes (C# != Db, C/G != C). Por fim, não existe um critério definido sobre a repetição dos acordes. (research/algoritmo-de-matching.md:23-25)
+1. No momento, de acordo com o que foi relatado no resersh-codebase, não existe nenhum cálculo que é realizado em tempo real para encontrar as músicas com as sequências famosas. (artifacts/reppit/research/entendimento-do-repositorio.md:195-196). Assim é realizado apenas um filtro nas músicas cuja o campo "SEQ_FAMOSA" contenha o índice como string.
+Essa parte de gerar a tag é feito no pipeline em "scripts/generate_data_set.py", que compara com a cifra em minúsculas e verifica se os acordes da música pertencem ao conjunto de acordes da sequência. (artifacts/reppit/research/entendimento-do-repositorio.md:200-207)
+Esse pré-processamento usa a regra de que o bloco de acordes da sequência aparece de forma contínua e na ordem exata durante a música e a música inteira só usa acordes que pertencem ao conjunto da sequência. (artifacts/reppit/research/algoritmo-de-matching.md:17-22)
+Além disso, há uma normalização parcial. O casamento de acordes ignora maiúsculas/minúsculas (.lower()), entretanto não há uma normalização na grafia dos acordes (C# != Db, C/G != C). Por fim, não existe um critério definido sobre a repetição dos acordes. (artifacts/reppit/research/algoritmo-de-matching.md:23-25)
 
-2. O agente em "research/algoritmo-de-matching.md" reproduziu involuntariamente a regra de match com a base de dados real. Ele reproduziu o "get_famosas" sobre as músicas e comparou com o valor que foi salvo no campo "SEQ_FAMOSA". Ele encontrou 0 divergências nessa verificação. Mas, por garantia, pedi para ele gerar um algoritmo em que confirmasse isso. (artifacts/verifica_matching.py). Ao rodar o código, de fato fica confirmado que a hipótese do algoritmo de match está correto. A saída foi:
+2. O agente em "artifacts/reppit/research/algoritmo-de-matching.md" reproduziu involuntariamente a regra de match com a base de dados real. Ele reproduziu o "get_famosas" sobre as músicas e comparou com o valor que foi salvo no campo "SEQ_FAMOSA". Ele encontrou 0 divergências nessa verificação. Mas, por garantia, pedi para ele gerar um algoritmo em que confirmasse isso. (artifacts/verifica_matching.py). Ao rodar o código, de fato fica confirmado que a hipótese do algoritmo de match está correto. A saída foi:
 ```bash
 arquivo: data/top/dataset_final.csv
 sequências: 6
@@ -64,8 +64,8 @@ carregando main.py (lê o CSV inteiro)...
 RESULTADO: regra reproduz as tags em todas as comparações
 ```
 
-3. São vários os bancos que são viáveis dentro do container Docker único e local-only, entretanto cada um possui sua particularidade. Entre eles temos o SQLite, libSQL, DuckDB, LMDB e etc. (research/bancos-embarcados-docker.md:129-143). Apesar do texto verborrágico, o modelo se propôs a explicar de fato cada uma das opção da melhor forma possível, de fato com uma visão de pesquisa/research. 
-Independentemente dessas escolhas, as principais mudanças para o Dockerfile são às mesmas. Sendo elas (research/bancos-embarcados-docker.md:269-291):
+3. São vários os bancos que são viáveis dentro do container Docker único e local-only, entretanto cada um possui sua particularidade. Entre eles temos o SQLite, libSQL, DuckDB, LMDB e etc. (artifacts/reppit/research/bancos-embarcados-docker.md:129-143). Apesar do texto verborrágico, o modelo se propôs a explicar de fato cada uma das opção da melhor forma possível, de fato com uma visão de pesquisa/research.
+Independentemente dessas escolhas, as principais mudanças para o Dockerfile são às mesmas. Sendo elas (artifacts/reppit/research/bancos-embarcados-docker.md:269-291):
     - Utilizar o caminho para o banco de dados fora do "/app";
     - Declarar um "VOLUME" no Dockerfile ou exigir "-v" no "docker run";
     - Dono do arquivo;
@@ -79,7 +79,7 @@ Com essas modificações e selecionado o banco de dados, precisamos definir o n�
 O requisito ser apenas "não volta a ser perdido ao reiniciar o container" é atendido pelo primeiro cenário mesmo sem volume, mas qualquer um dos outros dois perde os dados salvos. Persistência de verdade exige a volume ou bind mount.
 
 4. Atualmente na página #/porsequencia possui 4 sequências hardcodeds. Sequências essas que são um sub-conjunto das 6 sequências fixas no backend (as duas ausentes são Em-G e C-A7-Dm-G7), porém que não são sincronizadas de nenhuma forma.
-Atualmente a página realiza a chamada da função/requisição para resgatar às músicas com essa sequência de acordes pré-processadas no backend, opcionalmente pode filtrar por gênero musical. Ela também consegue limpar as sequências selecionadas e os resultados. (research/entendimento-do-repositorio.md:294-304)
+Atualmente a página realiza a chamada da função/requisição para resgatar às músicas com essa sequência de acordes pré-processadas no backend, opcionalmente pode filtrar por gênero musical. Ela também consegue limpar as sequências selecionadas e os resultados. (artifacts/reppit/research/entendimento-do-repositorio.md:294-304)
 
 
 ## Trade-offs identificados

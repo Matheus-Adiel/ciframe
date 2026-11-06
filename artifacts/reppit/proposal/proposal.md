@@ -2,7 +2,7 @@
 
 > **Documento de registro.** Este é o texto atualizado da Proposta 1, a
 > abordagem escolhida em 2026-11-05. O conteúdo canônico e mantido é
-> [`docs/features/sequencias-customizadas/02-proposal.md`](../docs/features/sequencias-customizadas/02-proposal.md);
+> [`docs/features/sequencias-customizadas/02-proposal.md`](../../../docs/features/sequencias-customizadas/02-proposal.md);
 > este arquivo preserva o texto da proposta submetida para decisão.
 
 ## Abordagem escolhida
@@ -90,7 +90,7 @@ problema:
 - é um arquivo único, com transações ACID e constraint `UNIQUE`, o que resolve
   deduplicação sem código extra;
 - cabe no container único e local-only do
-  [ADR 0001](../docs/adr/0001-local-only-docker-deploy.md), sem porta, daemon ou
+  [ADR 0001](../../../docs/adr/0001-local-only-docker-deploy.md), sem porta, daemon ou
   container auxiliar;
 - o volume de dados é minúsculo (centenas de linhas), e o padrão de acesso é
   “muitas leituras, pouquíssimas escritas”, que é o caso de uso canônico do

@@ -41,7 +41,7 @@ Arquivos lidos integralmente para esta pesquisa:
   `static/assets/js/controllers/musica.js`, `static/templates/sequencia.html`,
   `static/assets/js/app.js`, `static/assets/js/routes.js`, `README.md`,
   `docs/adr/0001-local-only-docker-deploy.md` e
-  `research/entendimento-do-repositorio.md`.
+  `artifacts/reppit/research/entendimento-do-repositorio.md`.
 
 Medições executadas contra a base real:
 

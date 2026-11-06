@@ -1,12 +1,23 @@
 # coding: utf-8
 import json
+import math
+import threading
+import time
 from flask import Flask, request
 import sys
 from musica import *
 from collections import OrderedDict
 import unicodedata
 
+from matching import IndiceSequencias, bit_ligado
+from sequencias_store import (
+    CatalogoSequencias,
+    LimiteDeSequenciasError,
+    normalizar_acordes,
+)
+
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024
 
 def limpa_cifra(raw_cifra):
     cifra = []
@@ -37,6 +48,7 @@ TAM_PAGINA = 100
 genero_musicas = {}
 generos = set()
 acordes = set()
+# Chaves legadas do alias ?sequencia= (sem vírgulas), preservando os índices.
 sequencias = {'BmGDA' : 0,
         'CGAmF' : 1,
         'EmG' : 2,
@@ -96,6 +108,68 @@ for k,v in genero_musicas.items():
     genero_musicas[k].sort(key = lambda x : x.popularidade, reverse = True)
 
 f.close()
+
+# Catálogo persistido de sequências (SQLite) e índice de matching em memória.
+catalogo_sequencias = CatalogoSequencias()
+indice_sequencias = IndiceSequencias(list(musicas.values()))
+
+# As 6 seeds são calculadas eagerly; customizadas são calculadas lazy na
+# primeira busca e cacheadas.
+for _sequencia_original in catalogo_sequencias.listar():
+    if _sequencia_original.origem == 'original':
+        indice_sequencias.obter(_sequencia_original.id,
+                                _sequencia_original.acordes)
+
+
+class _RateLimiter:
+    """Rate limit em memória, por processo e por chave (IP)."""
+
+    def __init__(self, limite=10, janela=60.0):
+        self.limite = limite
+        self.janela = janela
+        self._eventos = {}
+        self._lock = threading.Lock()
+
+    def permitir(self, chave):
+        agora = time.monotonic()
+        with self._lock:
+            eventos = self._eventos.setdefault(chave, [])
+            limite_inferior = agora - self.janela
+            while eventos and eventos[0] <= limite_inferior:
+                eventos.pop(0)
+
+            if len(eventos) >= self.limite:
+                retry_after = max(
+                    1, int(math.ceil(self.janela - (agora - eventos[0])))
+                )
+                return False, retry_after
+
+            eventos.append(agora)
+            return True, 0
+
+    def limpar(self, chave=None):
+        with self._lock:
+            if chave is None:
+                self._eventos.clear()
+            else:
+                self._eventos.pop(chave, None)
+
+
+rate_limiter_post = _RateLimiter()
+
+
+def erro_json(mensagem, status, cabecalhos=None):
+    return json.dumps({'erro': mensagem}), status, cabecalhos or {}
+
+
+@app.errorhandler(413)
+def _erro_corpo_grande(_erro):
+    return erro_json('corpo da requisição muito grande', 413)
+
+
+@app.errorhandler(500)
+def _erro_interno(_erro):
+    return erro_json('erro interno ao processar a requisição', 500)
 
 
 @app.route('/')
@@ -163,6 +237,63 @@ def get_generos():
 def get_acordes():
     return json.dumps(list(acordes))
 
+@app.route('/sequencias')
+def get_sequencias():
+    try:
+        return json.dumps([
+            sequencia.para_dict()
+            for sequencia in catalogo_sequencias.listar()
+        ])
+    except Exception:
+        app.logger.exception('falha ao listar o catálogo de sequências')
+        return erro_json('não foi possível listar as sequências', 500)
+
+@app.route('/sequencias', methods=['POST'])
+def post_sequencias():
+    # A checagem de rate limit vem antes da validação do corpo (O-18).
+    chave_rate = request.remote_addr or 'desconhecido'
+    permitido, retry_after = rate_limiter_post.permitir(chave_rate)
+    if not permitido:
+        return erro_json(
+            'limite de cadastros atingido; tente novamente mais tarde',
+            429,
+            {'Retry-After': str(retry_after)},
+        )
+
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return erro_json('corpo da requisição deve ser um objeto JSON', 400)
+
+    acordes_brutos = dados.get('acordes')
+    if not isinstance(acordes_brutos, list):
+        return erro_json('o campo "acordes" deve ser uma lista', 400)
+
+    try:
+        acordes = normalizar_acordes(acordes_brutos)
+    except ValueError as exc:
+        return erro_json(str(exc), 400)
+
+    try:
+        sequencia, criada = catalogo_sequencias.criar(acordes)
+    except ValueError as exc:
+        return erro_json(str(exc), 400)
+    except LimiteDeSequenciasError as exc:
+        return erro_json(str(exc), 429)
+    except Exception:
+        app.logger.exception('falha ao cadastrar sequência')
+        return erro_json('não foi possível cadastrar a sequência', 500)
+
+    if criada:
+        try:
+            indice_sequencias.obter(sequencia.id, sequencia.acordes)
+        except Exception:
+            # O-06: a linha já está persistida; a busca recalcula lazy.
+            app.logger.exception(
+                'falha ao calcular o bitset da sequência %s', sequencia.id
+            )
+
+    return json.dumps(sequencia.para_dict()), 201 if criada else 200
+
 @app.route('/musica/<m_id>/')
 def get_musica(m_id):
     return json.dumps(musicas[m_id].__dict__)
@@ -172,6 +303,7 @@ def get_similares():
     # tratando request
     acordes_tag = request.args.get('acordes')
     id_musica_tag = request.args.get('id_unico_musica')
+    sequencia_id_tag = request.args.get('sequencia_id')
     sequencia_tag = request.args.get('sequencia')
     pagina_tag = request.args.get('pagina','1')
 
@@ -187,26 +319,72 @@ def get_similares():
     elif id_musica_tag:
         musica = musicas[id_musica_tag]
         acordes = musica.acordes
-    elif sequencia_tag:
-        acordes = sequencia_tag.replace(',','')
-        similares = []
-
-        if acordes in sequencias:
-            id_seq = sequencias[acordes]
-            similares = get_pagina(get_similares_por_sequencia(id_seq, generos_key), pagina_tag)
-        return json.dumps(similares)
+    elif sequencia_id_tag is not None:
+        return resposta_sequencia(
+            sequencia_por_id(sequencia_id_tag), generos_key, pagina_tag
+        )
+    elif sequencia_tag is not None:
+        return resposta_sequencia(
+            sequencia_por_alias(sequencia_tag), generos_key, pagina_tag
+        )
 
     similares = get_similares(acordes, generos_key, id_musica_tag)
 
     return json.dumps(get_pagina(similares, pagina_tag))
 
-def get_similares_por_sequencia(id_seq, generos_key):
+
+def sequencia_por_id(id_tag):
+    try:
+        id_seq = int(id_tag)
+    except (TypeError, ValueError):
+        return None
+    # Fora do intervalo de INTEGER do SQLite o id não pode existir; sem esta
+    # guarda o sqlite3 levanta OverflowError e a busca vira 500 em vez de [].
+    if id_seq < -(2 ** 63) or id_seq > 2 ** 63 - 1:
+        return None
+    return catalogo_sequencias.obter(id_seq)
+
+
+def sequencia_por_alias(alias):
+    # Primeiro a chave legada sem vírgulas (BmGDA, CA7DmG7, ...).
+    chave_legada = alias.replace(',', '').strip()
+    if chave_legada in sequencias:
+        return catalogo_sequencias.obter(sequencias[chave_legada])
+
+    # Depois a lista normalizada por strip().lower().
+    tokens = [token.strip() for token in alias.split(',') if token.strip()]
+    if not tokens:
+        return None
+    return catalogo_sequencias.buscar_por_chave(tokens)
+
+
+def resposta_sequencia(sequencia, generos_key, pagina_tag):
+    if sequencia is None:
+        return json.dumps([])
+
+    try:
+        bitset = indice_sequencias.obter(sequencia.id, sequencia.acordes)
+    except Exception:
+        # O-07: falha de cálculo não pode virar [] (que significa "sem
+        # resultados"); responde 500 JSON.
+        app.logger.exception(
+            'falha ao calcular o bitset da sequência %s', sequencia.id
+        )
+        return erro_json('não foi possível calcular a sequência', 500)
+
+    similares = get_similares_por_sequencia(bitset, generos_key)
+    return json.dumps(get_pagina(similares, pagina_tag))
+
+
+def get_similares_por_sequencia(bitset, generos_key):
     # filtra para melhor desempenho
     collection = apply_filtro(musicas.values(), generos_key)
+    posicoes = indice_sequencias.posicoes
 
     similares = []
     for musica in collection:
-        if str(id_seq) in musica.seqs_famosas:
+        indice = posicoes.get(musica.id_unico_musica)
+        if indice is not None and bit_ligado(bitset, indice):
             similar = {
                 'id_unico_musica' : musica.id_unico_musica,
                 'id_artista' : musica.id_artista,

@@ -3,6 +3,10 @@
 > Esta fase produz apenas o plano. Nenhum arquivo de código é alterado aqui.
 > Se a implementação mudar de rumo, este documento deve ser atualizado antes de
 > continuar.
+>
+> Fluxos de execução detalhados por caso de uso e decisões a validar:
+> [`artifacts/fluxos-sequencias-customizadas.md`](../../../artifacts/fluxos-sequencias-customizadas.md).
+> Decisões confirmadas: O-01, O-06, O-07, O-10, O-13 e O-18 (detalhes no artefato).
 
 ## Contexto Atual
 
@@ -19,7 +23,7 @@
 - A regra que gerou `SEQ_FAMOSA` já foi validada contra a base real: bloco
   contíguo na ordem exata + conjunto de acordes da música contido no conjunto da
   sequência, comparando em minúsculas, com 0 divergências
-  (`artifacts/verifica_matching.py`, `research/algoritmo-de-matching.md`).
+  (`artifacts/verifica_matching.py`, `artifacts/reppit/research/algoritmo-de-matching.md`).
 - Todos os endpoints devolvem `json.dumps(...)` como string, com
   `Content-Type: text/html`, inclusive erros; isso é comportamento legado e não
   será alterado.
@@ -102,6 +106,10 @@ casa(cifra C, sequência S) =
   regressão.
 - Lista vazia é rejeitada no cadastro; `casa` também devolve `False` para
   sequência vazia.
+- O nome de cada acorde é validado contra uma lista fechada de raízes
+  (`A`–`G`, com `#`/`b`), sufixos usuais (`m`, `7M`, `sus`, `add`, alterações,
+  baixo invertido etc.) e extensões; texto como `aaaaaaaa` retorna `400` e não
+  é cadastrado.
 
 ### 2. Persistência
 
@@ -111,6 +119,8 @@ SQLite da stdlib, arquivo único, sem serviço externo.
   `./var/deciframe.db` localmente quando a variável não existe.
 - `CREATE TABLE IF NOT EXISTS`, `PRAGMA user_version = 1` e
   `INSERT OR IGNORE` para as seeds; inicialização idempotente.
+- Falha ao abrir/criar o SQLite aborta o startup; não há fallback silencioso
+  para `./var` (O-01 confirmado).
 - `PRAGMA journal_mode=WAL`, `busy_timeout` e uma conexão por operação, sempre
   com SQL parametrizado.
 - As 6 seeds são imutáveis e usam IDs fixos 0–5; customizadas começam em 6.
@@ -128,6 +138,9 @@ Um `bytearray` (bitset) por sequência, com 1 bit por música.
   lazily na primeira busca e cacheadas por `id_seq`.
 - Sequência recém-cadastrada é calculada no próprio `POST`, para a primeira
   busca já ser rápida.
+- Falha no cálculo durante o `POST` mantém a linha persistida e responde `201`;
+  a busca recalcula lazy. Falha no cálculo durante a busca responde `500` JSON,
+  sem mascarar como `[]` (O-06/O-07 confirmados).
 - Cache e rate limit usam lock; o cálculo pesado fica fora do lock. Se duas
   requisições calcularem a mesma sequência, o resultado é idempotente.
 - Alternativa descartada: `set` de IDs por sequência, cujo tamanho depende do
@@ -143,6 +156,8 @@ Um `bytearray` (bitset) por sequência, com 1 bit por música.
   `?sequencia=`.
 - `sequencia_id` inválido, não numérico ou inexistente retorna `[]` com HTTP
   200, preservando o comportamento atual de sequência desconhecida.
+- A ordem da resposta permanece a ordem atual da coleção filtrada; a ordenação
+  por popularidade continua no frontend (O-13 confirmado).
 - Duplicata é verificada antes do teto de 500; com catálogo cheio, cadastrar
   sequência existente continua retornando `200`.
 - Não há `PUT` nem `DELETE`; as seeds não podem ser alteradas.
@@ -154,10 +169,28 @@ Um `bytearray` (bitset) por sequência, com 1 bit por música.
 - Cada acorde é adaptado para o formato do `df-hex`:
   `{acorde: "Bm", cor: "#..."}`; a cor vem de um mapa fixo por nota raiz, com
   fallback.
+- O cadastro fica acima do catálogo. A mesma barra serve para buscar uma
+  sequência existente: o `POST` de duplicata retorna o `id` e a UI seleciona a
+  sequência, enquanto uma sequência nova é cadastrada e buscada em seguida.
 - Campo de texto aceita vírgula e/ou espaço, remove tokens vazios e preserva a
-  ordem digitada; a dica “2 a 8 acordes” é só de UI.
-- A paleta curada de `acordes.js` é usada apenas como sugestão (chips); o campo
-  continua livre para qualquer acorde.
+  ordem digitada; a dica “2 a 8 acordes” é só de UI e orienta o uso da barra
+  para busca ou cadastro. O texto digitado aparece em branco.
+- A paleta e as sugestões ficam em um mapa local em `sequencia.js`, sem
+  constante compartilhada; a paleta curada de `acordes.js` é usada apenas como
+  referência de cores (O-10 confirmado). O campo continua livre para qualquer
+  acorde, mas o backend rejeita nomes fora do formato.
+- O painel esquerdo e o botão “Conheces alguma dessas sequências de acordes?” na
+  home usam o mesmo tom mais escuro que a cor dos acordes F/F#/Fm/F7
+  (`#8C005D` em vez de `#BA007C`), e a paleta de sugestões é ligeiramente
+  maior para facilitar o clique.
+- A seção “Sequências cadastradas” começa depois de um espaçamento maior, com
+  título de tamanho destacado; a paleta também ganha espaço em relação ao botão
+  “Buscar / cadastrar”.
+- Sequências com mais de 6 acordes continuam quebrando linha dentro do painel,
+  mas as linhas de continuação ficam recuadas para pertencerem visualmente à
+  mesma sequência.
+- O feedback do cadastro/busca fica em texto branco e negrito, com um ícone
+  que diferencia sucesso, duplicata, validação e limite.
 - `POST /sequencias` é disparado com `{acordes: [...]}`; a UI trata `201`,
   `200`, `400` e `429`.
 - Busca passa a usar `sequencia_id`; o restante do fluxo (progressbar, esfige,
@@ -170,7 +203,8 @@ Um `bytearray` (bitset) por sequência, com 1 bit por música.
 ### 6. Anti-abuso
 
 - Rate limit em memória: 10 `POST /sequencias` por minuto por
-  `request.remote_addr`, com `429` e `Retry-After`.
+  `request.remote_addr`, com `429` e `Retry-After`. A checagem acontece antes
+  da validação do corpo (O-18 confirmado).
 - Teto de 500 customizadas; seeds não contam; duplicata continua `200`.
 - `MAX_CONTENT_LENGTH = 16 * 1024`, com `413` para excesso.
 - Sem edição/remoção; acordes exibidos por interpolação Angular (`{{ }}`), que
@@ -254,8 +288,8 @@ CREATE TABLE IF NOT EXISTS sequencias (
 | `GET /similares?sequencia_id=` | `sequencia_id`, `generos`, `pagina` | `200` com página de músicas | `[]` para id inválido/inexistente |
 | `GET /similares?sequencia=` | lista ou chave legada | `200` com página de músicas | `[]` para chave desconhecida |
 
-- Fluxo de cadastro: rate limit → parse/validação → duplicata → teto → insert →
-  cálculo do bitset → resposta.
+- Fluxo de cadastro: rate limit → parse/normalização → duplicata → teto →
+  validação do formato dos acordes → insert → cálculo do bitset → resposta.
 - Fluxo de busca: resolve `id_seq` → obtém bitset (lazy se necessário) → percorre
   `apply_filtro(musicas.values(), generos_key)` na ordem atual → testa o bit →
   pagina com `get_pagina`.
@@ -271,63 +305,66 @@ deve ser alterado nesta feature.
 
 ### Fase 1 — Fundação de matching e persistência
 
-- [ ] Criar `matching.py` com `casa`, `construir_bitset` e `IndiceSequencias`
+- [x] Criar `matching.py` com `casa`, `construir_bitset` e `IndiceSequencias`
   (mapa de posições, cache, lock).
-- [ ] Criar `sequencias_store.py` com resolução de `DECIFRAME_DB`, schema,
+- [x] Criar `sequencias_store.py` com resolução de `DECIFRAME_DB`, schema,
   seeds, normalização de chave, listagem, busca, criação idempotente e contagem
   de customizadas.
-- [ ] Criar `tests/test_matching.py` cobrindo ordem, contiguidade, conjunto
+- [x] Criar `tests/test_matching.py` cobrindo ordem, contiguidade, conjunto
   fechado, caixa, repetições, lista vazia e ausência de transposição.
-- [ ] Criar `tests/test_sequencias_store.py` cobrindo seeds, dedupe, chave,
+- [x] Criar `tests/test_sequencias_store.py` cobrindo seeds, dedupe, chave,
   `AUTOINCREMENT` em 6, teto e reabertura do arquivo.
 - Estimativa: 0,5–1 dia.
 
 ### Fase 2 — API no `main.py`
 
-- [ ] Inicializar `CatalogoSequencias` e `IndiceSequencias` após a carga do CSV;
+- [x] Inicializar `CatalogoSequencias` e `IndiceSequencias` após a carga do CSV;
   calcular as seeds 0–5 eagerly.
-- [ ] Adicionar `GET /sequencias` e `POST /sequencias` mantendo `json.dumps`.
-- [ ] Substituir o branch de sequência em `/similares` por bitset; adicionar
+- [x] Adicionar `GET /sequencias` e `POST /sequencias` mantendo `json.dumps`.
+- [x] Substituir o branch de sequência em `/similares` por bitset; adicionar
   `sequencia_id` e manter o alias `sequencia` com a resolução em duas etapas.
-- [ ] Configurar `MAX_CONTENT_LENGTH`, `@app.errorhandler(413)` e o rate limiter
+- [x] Configurar `MAX_CONTENT_LENGTH`, `@app.errorhandler(413)` e o rate limiter
   com `429` + `Retry-After`.
-- [ ] Rodar `artifacts/verifica_matching.py` e um teste novo que compare a API
+- [x] Rodar `artifacts/verifica_matching.py` e um teste novo que compare a API
   das 6 seeds com as tags do CSV.
 - Estimativa: 1 dia.
 
 ### Fase 3 — Frontend `#/porsequencia`
 
-- [ ] Reescrever `sequencia.js` para carregar `GET /sequencias`, montar a paleta
+- [x] Reescrever `sequencia.js` para carregar `GET /sequencias`, montar a paleta
   de cores, cadastrar via `POST /sequencias` e buscar por `sequencia_id`.
-- [ ] Adicionar ao template o campo de cadastro, a dica “2 a 8 acordes”, as
-  sugestões e as mensagens de sucesso/duplicata/erro/limite.
-- [ ] Corrigir o `ng-hide` que depende de `music.diferenca`.
-- [ ] Testar manualmente no browser: listar seeds, cadastrar, duplicar, buscar,
-  filtrar por gênero e abrir cifra.
+- [x] Adicionar ao template o campo de cadastro/busca acima do catálogo, a dica
+  “2 a 8 acordes”, as sugestões e as mensagens de sucesso/duplicata/erro/limite
+  com indicador visual, com espaçamento entre as seções e recuo das linhas
+  quebradas de sequências longas.
+- [x] Corrigir o `ng-hide` que depende de `music.diferenca`.
+- [x] Testar no browser: listar seeds, cadastrar, duplicar, buscar,
+  filtrar por gênero e abrir cifra (smoke automatizado em
+  `artifacts/smoke_frontend.py`).
 - Estimativa: 0,5–1 dia.
 
 ### Fase 4 — Deploy e operação
 
-- [ ] Atualizar `Dockerfile` com `ENV DECIFRAME_DB=/data/deciframe.db`,
+- [x] Atualizar `Dockerfile` com `ENV DECIFRAME_DB=/data/deciframe.db`,
   `RUN mkdir -p /data`, `VOLUME ["/data"]` e `--workers 1`.
-- [ ] Adicionar `var/`, `*.db`, `*.db-wal`, `*.db-shm` a `.gitignore` e
+- [x] Adicionar `var/`, `*.db`, `*.db-wal`, `*.db-shm` a `.gitignore` e
   `.dockerignore`.
-- [ ] Atualizar `README.md` e `AGENTS.md` com o `docker run -v
+- [x] Atualizar `README.md` e `AGENTS.md` com o `docker run -v
   deciframe-data:/data`, o caminho local do banco, o worker único e o backup.
-- [ ] Validar que montar volume em `/app/data` não é feito em nenhum comando
+- [x] Validar que montar volume em `/app/data` não é feito em nenhum comando
   documentado.
 - Estimativa: 0,25 dia.
 
 ### Fase 5 — Testes e fechamento
 
-- [ ] Criar testes de integração com `Flask.test_client` para `GET/POST
+- [x] Criar testes de integração com `Flask.test_client` para `GET/POST
   /sequencias`, `sequencia_id`, alias, precedência, paginação, `400/413/429` e
   `Content-Type`.
-- [ ] Criar teste de persistência: cadastrar, fechar/reabrir o banco e verificar
+- [x] Criar teste de persistência: cadastrar, fechar/reabrir o banco e verificar
   que a sequência continua disponível.
 - [ ] Rodar smoke test no Docker: `/generos`, `/sequencias`, cadastro, busca,
   `docker restart` e `docker rm` + `docker run` com o mesmo volume.
-- [ ] Preencher `04-test-report.md` com cobertura, comando exato e resultado da
+- [x] Preencher `04-test-report.md` com cobertura, comando exato e resultado da
   regressão.
 - Estimativa: 0,5 dia.
 
@@ -337,20 +374,22 @@ Tempo total estimado: **2,75–3,75 dias**.
 
 | Arquivo | Mudança |
 |---|---|
-| `main.py` | Inicializa catálogo/índice; adiciona `GET/POST /sequencias`; troca a busca por sequência para bitset; adiciona `sequencia_id`, alias legado, `MAX_CONTENT_LENGTH`, `413` e rate limit. |
+| `main.py` | Inicializa catálogo/índice; adiciona `GET/POST /sequencias`; troca a busca por sequência para bitset; adiciona `sequencia_id`, alias legado, `MAX_CONTENT_LENGTH`, `413`, rate limit e `400` para acorde fora do formato. |
 | `musica.py` | Nenhuma alteração prevista; `cifra`/`acordes`/`seqs_famosas` continuam como estão. |
-| `sequencias_store.py` (novo) | Acesso ao SQLite, schema, seeds, normalização de chave, dedupe, listagem, criação e contagem. |
+| `sequencias_store.py` (novo) | Acesso ao SQLite, schema, seeds, normalização de chave, validação do formato dos acordes, dedupe, listagem, criação e contagem. |
 | `matching.py` (novo) | Regra `casa`, construção de bitset e `IndiceSequencias` com posições, cache e lock. |
-| `static/assets/js/controllers/sequencia.js` | Remove as 4 sequências hardcoded; carrega o catálogo, cadastra, sugere acordes e busca por `sequencia_id`. |
-| `static/templates/sequencia.html` | Adiciona formulário/dica/sugestões/mensagens; corrige o `ng-hide` de `diferenca`. |
+| `static/assets/js/controllers/sequencia.js` | Remove as 4 sequências hardcoded; carrega o catálogo, cadastra/busca, sugere acordes, busca por `sequencia_id` e exibe feedback com indicador. |
+| `static/templates/sequencia.html` | Adiciona formulário/dica/sugestões/mensagens e move o cadastro para o topo; separa o título do catálogo; corrige o `ng-hide` de `diferenca`. |
+| `static/assets/css/app.css` | Alinha o tom do painel de sequências e do botão da home, deixa dica/feedback/input brancos, aumenta a paleta e recua as linhas quebradas do catálogo. |
 | `Dockerfile` | `/data`, `ENV DECIFRAME_DB`, `VOLUME` e `--workers 1`. |
 | `.gitignore` | Ignora `var/`, `*.db`, `*.db-wal`, `*.db-shm`. |
 | `.dockerignore` | Ignora `var/`, `*.db`, `*.db-wal`, `*.db-shm`. |
 | `README.md` | Comando com volume nomeado, persistência, worker único e backup. |
 | `AGENTS.md` | Atualiza gotchas de execução, banco local e volume. |
 | `tests/test_matching.py` (novo) | Testes unitários da regra e do bitset. |
-| `tests/test_sequencias_store.py` (novo) | Testes unitários do catálogo SQLite. |
-| `tests/test_api_sequencias.py` (novo) | Testes de integração da API, regressão das 6 seeds e persistência. |
+| `tests/test_sequencias_store.py` (novo) | Testes unitários do catálogo SQLite e da validação do formato dos acordes. |
+| `tests/test_api_sequencias.py` (novo) | Testes de integração da API, regressão das 6 seeds, validação de acordes e persistência. |
+| `artifacts/smoke_frontend.py` (novo) | Smoke opcional de browser (Selenium/geckodriver) do fluxo `#/porsequencia`. |
 | `docs/features/sequencias-customizadas/04-test-report.md` | Preenchido na Fase 5 com cobertura e resultado da regressão. |
 | `docs/adr/0002-persist-custom-sequences.md` | Já registra a decisão; apenas conferir, sem reescrever. |
 | `artifacts/verifica_matching.py` | Sem alteração; continua sendo o oráculo de regressão. |
@@ -409,6 +448,8 @@ Tempo total estimado: **2,75–3,75 dias**.
 - Persistência: criar sequência, fechar e reabrir o catálogo, buscar de novo.
 - Rate limit: limitador injetável ou resetável para não depender de 10 POSTs
   reais por teste; usar `remote_addr` controlado.
+- Smoke de browser opcional com Firefox headless (`artifacts/smoke_frontend.py`)
+  para catálogo, cadastro, duplicata, busca, filtro e abertura de cifra.
 - Cobertura esperada: todos os caminhos novos de `matching.py`,
   `sequencias_store.py` e das rotas; não há meta percentual rígida, mas os
   status `400/413/429` e a regressão das seeds são obrigatórios.
@@ -488,63 +529,67 @@ verificação é feita por testes automatizados e smoke test manual no Docker.
 
 - Runtime: nenhuma nova; `sqlite3`, `json`, `datetime` e `threading` são da
   stdlib.
-- Dev: nenhuma nova se os testes usarem `unittest` da stdlib; o comando previsto
-  é `python -m unittest discover -s tests -v`.
+- Dev: nenhuma nova dependência para a suíte principal, que usa `unittest` da
+  stdlib; o comando previsto é `python -m unittest discover -s tests -v`.
+  O smoke de browser opcional usa Selenium + geckodriver.
 - Ferramentas: Docker para o smoke test; `curl` para verificação manual.
 - Documentação externa: docs do `sqlite3` (Python 3.9) e do Flask 3.1 para
   `MAX_CONTENT_LENGTH`/`errorhandler`.
 
 ## Definição de pronto
 
-- [ ] `GET /generos` continua retornando um array JSON, sem regressão no
+- [x] `GET /generos` continua retornando um array JSON, sem regressão no
   startup.
-- [ ] `GET /sequencias` retorna as 6 seeds com IDs 0–5 e as listas exatas
+- [x] `GET /sequencias` retorna as 6 seeds com IDs 0–5 e as listas exatas
   `Bm,G,D,A`; `C,G,Am,F`; `Em,G`; `C,A7,Dm,G7`; `Gm,F`; `C,C7,F,Fm`.
-- [ ] Para cada seed `i`, somando as páginas de `GET /similares?sequencia_id=i`,
+- [x] Para cada seed `i`, somando as páginas de `GET /similares?sequencia_id=i`,
   o conjunto é idêntico ao da tag `i` do CSV: 199, 296, 4, 5, 7 e 3 músicas.
-- [ ] `?sequencia=Bm,G,D,A`, `?sequencia=BmGDA`, `?sequencia=CA7,Dm,G7` e
+- [x] `?sequencia=Bm,G,D,A`, `?sequencia=BmGDA`, `?sequencia=CA7,Dm,G7` e
   `?sequencia=C, G, Am, F` continuam funcionando e retornam os mesmos conjuntos
   das seeds correspondentes.
-- [ ] `POST /sequencias` com lista nova retorna `201`, grava a linha, aparece em
+- [x] `POST /sequencias` com lista nova retorna `201`, grava a linha, aparece em
   `GET /sequencias` e fica buscável por `sequencia_id` e pelo alias.
-- [ ] Cadastrar a mesma sequência de novo, inclusive com caixa/espaço
+- [x] Cadastrar a mesma sequência de novo, inclusive com caixa/espaço
   diferentes, retorna `200` com o mesmo ID e não cria linha duplicada.
-- [ ] Cadastrar uma sequência igual a uma seed retorna `200` com o ID da seed.
-- [ ] Lista vazia ou só com tokens em branco retorna `400`; 1 acorde é aceito;
+- [x] Cadastrar uma sequência igual a uma seed retorna `200` com o ID da seed.
+- [x] Lista vazia ou só com tokens em branco retorna `400`; 1 acorde é aceito;
   9 acordes são aceitos; não há mínimo/máximo rígido.
-- [ ] Teto de 500 customizadas retorna `429` para cadastro novo, mas duplicata
+- [x] Teto de 500 customizadas retorna `429` para cadastro novo, mas duplicata
   continua `200`; rate limit de 10 POSTs/minuto por IP retorna `429` com
   `Retry-After`.
-- [ ] Corpo acima de 16 KB retorna `413`.
-- [ ] Todas as respostas, inclusive `400`/`413`/`429`, continuam sendo
+- [x] Corpo acima de 16 KB retorna `413`.
+- [x] Todas as respostas, inclusive `400`/`413`/`429`, continuam sendo
   `json.dumps(...)` com `Content-Type: text/html`.
 - [ ] Sequência customizada sobrevive a `docker restart` e a `docker rm` +
   `docker run` com o mesmo volume nomeado; volume vazio inicializa as seeds sem
   duplicar.
-- [ ] Frontend lista seeds e customizadas, permite cadastrar, mostra a dica
-  “2 a 8 acordes”, usa a paleta só como sugestão, seleciona a sequência
-  retornada e exibe mensagens de duplicata/erro/limite.
-- [ ] O `ng-hide` de `static/templates/sequencia.html` não esconde mais
+- [x] Frontend lista seeds e customizadas, mantém o cadastro/busca acima do
+  catálogo, mostra a dica “2 a 8 acordes”, usa a paleta só como sugestão,
+  seleciona a sequência retornada e exibe mensagens destacadas de
+  duplicata/erro/limite.
+- [x] O `ng-hide` de `static/templates/sequencia.html` não esconde mais
   resultados por causa de `music.diferenca` ausente.
-- [ ] Não existe campo `nome` no banco, na API ou na UI; o rótulo é a lista de
+- [x] Não existe campo `nome` no banco, na API ou na UI; o rótulo é a lista de
   acordes.
-- [ ] `artifacts/verifica_matching.py` continua passando com 0 divergências e o
+- [x] `artifacts/verifica_matching.py` continua passando com 0 divergências e o
   teste novo compara a API das 6 seeds com as tags do CSV.
-- [ ] Com 500 customizadas, o custo adicional dos bitsets fica em ~4,1 MiB além
+- [x] Com 500 customizadas, o custo adicional dos bitsets fica em ~4,1 MiB além
   do mapa de posições, e o startup calcula apenas as 6 seeds.
-- [ ] A primeira busca de uma customizada vinda do banco pode custar ~0,1–0,4 s;
-  as seguintes não recalculam.
-- [ ] `Dockerfile`, README e AGENTS documentam `/data`, o volume nomeado, o
+- [x] A primeira busca de uma customizada vinda do banco é lazy e cacheada;
+  nesta máquina custou ~0,5–0,8 s, e as seguintes não recalculam.
+- [x] `Dockerfile`, README e AGENTS documentam `/data`, o volume nomeado, o
   worker único e o backup; nada monta volume em `/app/data`.
 
 ## Referências
 
+- [`artifacts/fluxos-sequencias-customizadas.md`](../../../artifacts/fluxos-sequencias-customizadas.md)
+  (fluxos UC-01 a UC-10 e decisões O-01 a O-18)
 - `docs/features/sequencias-customizadas/00-enunciado.md`
 - `docs/features/sequencias-customizadas/01-research.md`
 - `docs/features/sequencias-customizadas/02-proposal.md`
-- `research/entendimento-do-repositorio.md`
-- `research/algoritmo-de-matching.md`
-- `research/bancos-embarcados-docker.md`
+- `artifacts/reppit/research/entendimento-do-repositorio.md`
+- `artifacts/reppit/research/algoritmo-de-matching.md`
+- `artifacts/reppit/research/bancos-embarcados-docker.md`
 - `artifacts/verifica_matching.py`
 - `docs/adr/0001-local-only-docker-deploy.md`
 - `docs/adr/0002-persist-custom-sequences.md`

@@ -2,3 +2,7 @@ static/assets/vendor
 .venv
 *.pyc
 __pycache__/
+var/
+*.db
+*.db-wal
+*.db-shm
